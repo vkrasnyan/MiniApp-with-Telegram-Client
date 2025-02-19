@@ -1,6 +1,5 @@
 import logging
 import openai
-from openai import AsyncOpenAI
 from telethon import TelegramClient, events
 from telethon.errors import SessionPasswordNeededError
 
@@ -12,7 +11,7 @@ logger = logging.getLogger(__name__)
 # Инициализация клиента
 client = TelegramClient(settings.SESSION_NAME, settings.API_ID, settings.API_HASH)
 
-clientAI = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
+clientAI = openai.AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
 
 messages_data = []
 
@@ -25,21 +24,27 @@ async def get_all_chats():
         # Подключение к Telegram
         await client.start()
 
-        # # Если требуется двухфакторная аутентификация
-        # if not await client.is_user_authorized():
-        #     print("Пожалуйста, введите код для входа.")
-        #     await client.send_code_request(settings.PHONE_NUMBER)  # Укажите номер телефона в настройках
-        #     await client.sign_in(settings.PHONE_NUMBER, input("Введите код: "))
-
         dialogs = await client.get_dialogs()  # Получение всех чатов
 
         result = []
         for dialog in dialogs:
+            try:
+                # Попытка получить сущность чата
+                entity = await client.get_entity(dialog.id)
+                chat_type = type(entity).__name__
+            except ValueError:
+                logger.error(f"Не удалось получить сущность для чата {dialog.id}")
+                chat_type = "Unknown"
+
             result.append({
                 "title": dialog.name or "Без названия",
                 "id": dialog.id,
-                "type": type(dialog.entity).__name__,  # Тип чата
+                "type": chat_type,
+                'participants': dialog.entity.participants_count,
+                'unread_count': dialog.unread_count
             })
+
+            result.sort(key=lambda x: (x['participants'], x['unread_count']), reverse=True)
 
         return result
 
@@ -91,7 +96,6 @@ async def process_message_with_openai(message_text: str):
         return "Не удалось получить ответ от OpenAI."
 
 
-# Обработчик нового сообщения
 async def start_client():
     """Запускаем Telethon-клиент, который отправляет сообщение в OpenAI и получает ответ"""
     @client.on(events.NewMessage)
@@ -125,13 +129,13 @@ async def start_client():
             "openai_response": openai_response
         })
 
-        # Отправка ответа пользователю в чат
-        await event.reply(openai_response)
-
-        # Логируем информацию о сообщении и ответе
-        logger.info(f"Обработано сообщение от {sender_name} ({sender_id}) в чате {chat_title} ({chat_type}).")
-        logger.info(f"Исходное сообщение: {message_text}")
-        logger.info(f"Ответ от OpenAI: {openai_response}")
+        # # Отправка ответа пользователю в чат
+        # await event.reply(openai_response)
+        #
+        # # Логируем информацию о сообщении и ответе
+        # logger.info(f"Обработано сообщение от {sender_name} ({sender_id}) в чате {chat_title} ({chat_type}).")
+        # logger.info(f"Исходное сообщение: {message_text}")
+        # logger.info(f"Ответ от OpenAI: {openai_response}")
 
     await client.start()
     await client.run_until_disconnected()

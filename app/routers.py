@@ -104,6 +104,7 @@ async def complete_login_submit(request: Request, code: str = Form(...)):
 
 
 # Страница панели управления
+# Страница панели управления
 @router.get("/dashboard", response_class=HTMLResponse)
 async def dashboard(request: Request):
     user_client = await get_current_user(request)
@@ -121,11 +122,8 @@ async def dashboard(request: Request):
 
     # Получение существующих папок (фильтров диалогов)
     try:
-        # Обновление кэша диалогов
-        await user_client.get_dialogs()
-
         dialog_filters = await user_client(functions.messages.GetDialogFiltersRequest())
-        existing_filters = dialog_filters.filters  # Список фильтров
+        existing_filters = dialog_filters.filters if dialog_filters.filters else []
         logger.info(f"Получено {len(existing_filters)} фильтров диалогов.")
     except Exception as e:
         existing_filters = []
@@ -137,35 +135,35 @@ async def dashboard(request: Request):
         group_channels = []
         filter_title = getattr(dialog_filter, 'title', f"Фильтр {getattr(dialog_filter, 'id', 'unknown')}")
         include_peers = getattr(dialog_filter, 'include_peers', [])
-        logger.info(f"Фильтр: {filter_title}, количество include_peers: {len(include_peers)}")
 
-        # Логирование содержимого include_peers
-        for peer in include_peers:
-            logger.debug(f"Include Peer: {peer.to_dict()}")
+        logger.info(f"Фильтр: {filter_title}, количество include_peers: {len(include_peers)}")
 
         for included_peer in include_peers:
             try:
+                entity = None
+
                 if isinstance(included_peer, types.InputPeerChannel):
-                    channel_id = included_peer.channel_id
-                    entity = await user_client.get_entity(channel_id)
-                    if isinstance(entity, types.Channel):
-                        if entity.username:
-                            group_channels.append(f"@{entity.username}")
-                        else:
-                            group_channels.append(f"{entity.title} (ID: {entity.id})")
+                    entity = await user_client.get_input_entity(included_peer)
                 elif isinstance(included_peer, types.InputPeerUser):
-                    user_id = included_peer.user_id
-                    entity = await user_client.get_entity(user_id)
-                    if isinstance(entity, types.User):
-                        name = f"{entity.first_name or ''} {entity.last_name or ''}".strip()
-                        group_channels.append(f"{name} (ID: {entity.id})")
+                    entity = await user_client.get_input_entity(included_peer)
                 elif isinstance(included_peer, types.InputPeerChat):
-                    chat_id = included_peer.chat_id
-                    entity = await user_client.get_entity(chat_id)
-                    if isinstance(entity, types.Chat):
-                        group_channels.append(f"{entity.title} (ID: {entity.id})")
+                    entity = await user_client.get_input_entity(included_peer)
                 else:
-                    logger.info(f"Неизвестный тип peer: {included_peer}")
+                    logger.warning(f"Неизвестный тип peer: {included_peer}")
+                    continue
+
+                if isinstance(entity, types.Channel):
+                    group_channels.append(f"@{entity.username}" if entity.username else f"{entity.title} (ID: {entity.id})")
+                elif isinstance(entity, types.User):
+                    name = f"{entity.first_name or ''} {entity.last_name or ''}".strip()
+                    group_channels.append(f"{name} (ID: {entity.id})")
+                elif isinstance(entity, types.Chat):
+                    group_channels.append(f"{entity.title} (ID: {entity.id})")
+                else:
+                    logger.warning(f"Неизвестный тип сущности: {type(entity)}")
+
+            except ValueError:
+                logger.error(f"Ошибка: не найден entity для {included_peer}. Возможно, отсутствует access_hash.")
             except Exception as e:
                 logger.error(f"Ошибка при обработке peer {included_peer}: {e}")
                 continue
@@ -396,6 +394,9 @@ async def summarize_submit(
 
 @router.get("/chats", response_class=HTMLResponse)
 async def show_chats(request: Request):
+    user_client = await get_current_user(request)
+    if not user_client:
+        return RedirectResponse(url="/authenticate")
     dialogs = await get_all_chats()  # Получение списка чатов
     return templates.TemplateResponse("dialogs.html", {"request": request, "dialogs": dialogs})
 
