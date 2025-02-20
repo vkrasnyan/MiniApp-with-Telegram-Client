@@ -1,17 +1,33 @@
 {% extends "base.html" %}
 
 {% block content %}
-<h2>Последние сообщения из канала @{{ channel }}</h2>
+<h2>Последние сообщения из "{{ chat_name }}"</h2>
+
+{% if chat_type %}
+    <p>Тип чата: {{ chat_type }}</p>
+{% endif %}
+
+
 {% if messages %}
-    <ul>
+    <ul class="messages-list">
         {% for message in messages %}
-            <li>
-                <strong>{{ message.date }}:</strong> {{ message.text }}
+            <li class="message-item">
+                <span class="message-date">{{ message.date }}</span>
+                <p class="message-text">
+                    {% if message.text %}
+                        {{ message.text }}  {# Выводим текст, если он есть #}
+                    {% else %}
+                        <span class="media-placeholder">[Медиафайл]</span>  {# Или выводим placeholder, если сообщения без текста #}
+                    {% endif %}
+                </p>
             </li>
         {% endfor %}
     </ul>
 {% else %}
-    <p>Нет сообщений для отображения.</p>
+    <p class="no-messages">Нет сообщений для отображения.</p>
 {% endif %}
-<p><a href="/dashboard">Назад к каналам</a></p>
+
+<p><a href="/dashboard" class="back-link">Назад</a></p>
 {% endblock %}
+
+

@@ -1,29 +1,76 @@
-<!DOCTYPE html>
-<html>
-<head>
-    <title>Панель Управления</title>
-</head>
-<body>
-    <h1>Все каналы</h1>
-    <ul>
-        {% for channel in channels %}
-            <li><a href="/last-messages/{{ channel }}">{{ channel }}</a></li>
-        {% endfor %}
-    </ul>
+{% extends "base.html" %}
 
-    <h1>Фильтры (Папки)</h1>
-    {% for group in groups %}
-        <h2>{{ group.filter_name }}</h2>
+{% block content %}
+    <h1>Панель управления</h1>
+
+    <h2>Сортировка</h2>
+    <form method="get" action="{{ request.url.path }}">
+        <label for="sort_by">Сортировать по:</label>
+        <select name="sort_by" id="sort_by">
+            <option value="participants" {% if sort_by == "participants" %}selected{% endif %}>Кол-ву участников</option>
+            <option value="unread" {% if sort_by == "unread" %}selected{% endif %}>Кол-ву непрочитанных</option>
+        </select>
+        <button type="submit">Применить</button>
+    </form>
+
+    <h2>Все каналы</h2>
+    {% if channels %}
         <ul>
-            {% for channel in group.channels %}
-                <li><a href="/last-messages/{{ channel }}">{{ channel }}</a></li>
+            {% for channel in channels %}
+                <li>
+                    <a href="/last-messages/{{ channel.name }}">{{ channel.name }}</a>
+                    (участников: {{ channel.participants_count }}, непрочитанных: {{ channel.unread_count }})
+                </li>
             {% endfor %}
         </ul>
-    {% endfor %}
-    
+    {% else %}
+        <p>Нет доступных каналов.</p>
+    {% endif %}
+
+    <h2>Все группы</h2>
+    {% if groups %}
+        <ul>
+            {% for group in groups %}
+                <li>
+                    <a href="/last-messages/{{ group.name }}">{{ group.name }}</a>
+                    (участников: {{ group.participants_count }}, непрочитанных: {{ group.unread_count }})
+                </li>
+            {% endfor %}
+        </ul>
+    {% else %}
+        <p>Нет доступных групп.</p>
+    {% endif %}
+
+    <h2>Личные чаты</h2>
+    {% if private_chats %}
+        <ul>
+            {% for chat in private_chats %}
+                <li>
+                    <a href="/last-messages/{{ chat.name }}">{{ chat.name }}</a>
+                    (непрочитанных: {{ chat.unread_count }})
+                </li>
+            {% endfor %}
+        </ul>
+    {% else %}
+        <p>Нет доступных чатов.</p>
+    {% endif %}
+
+    <h2>Фильтры (Папки)</h2>
+    {% if groups_with_channels %}
+        {% for group in groups_with_channels %}
+            <h3>{{ group.filter_name }}</h3>
+            <ul>
+                {% for channel in group.channels %}
+                    <li><a href="/last-messages/{{ channel }}">{{ channel }}</a></li>
+                {% endfor %}
+            </ul>
+        {% endfor %}
+    {% else %}
+        <p>Нет доступных фильтров.</p>
+    {% endif %}
+
     <br>
     <a href="/summarize">Суммаризировать Сообщения</a>
-    <br><br>
-    <a href="/logout">Выйти</a>
-</body>
-</html>
+{% endblock %}
+
+

@@ -104,21 +104,67 @@ async def complete_login_submit(request: Request, code: str = Form(...)):
 
 
 # Страница панели управления
-# Страница панели управления
 @router.get("/dashboard", response_class=HTMLResponse)
-async def dashboard(request: Request):
+async def dashboard(request: Request, sort_by: str = "participants"):
     user_client = await get_current_user(request)
     if not user_client:
         return RedirectResponse(url="/authenticate")
 
-    # Получение списка всех каналов
+    # Получение списка всех диалогов (каналы, группы, личные чаты)
     try:
         dialogs = await user_client.get_dialogs()
-        all_channels = [dialog.entity.username for dialog in dialogs if dialog.is_channel and dialog.entity.username]
-        logger.info(f"Найдено {len(all_channels)} каналов.")
+        all_channels = []
+        all_groups = []
+        all_private_chats = []
+
+        for dialog in dialogs:
+            entity = dialog.entity
+
+            # Каналы
+            if dialog.is_channel and entity.username:
+                all_channels.append({
+                    "name": f"@{entity.username}",
+                    "participants_count": getattr(entity, "participants_count", 0),
+                    "unread_count": dialog.unread_count
+                })
+
+            # Группы (супергруппы и обычные группы)
+            elif dialog.is_group:
+                group_name = getattr(entity, 'title', f"Группа {entity.id}")
+                all_groups.append({
+                    "id": entity.id,
+                    "name": group_name,
+                    "participants_count": getattr(entity, "participants_count", 0),
+                    "unread_count": dialog.unread_count
+                })
+
+
+            # Личные чаты
+            elif dialog.is_user:
+                user_name = f"{entity.first_name or ''} {entity.last_name or ''}".strip()
+                all_private_chats.append({
+                    "id": entity.id,
+                    "name": user_name,
+                    "participants_count": 1,
+                    "unread_count": dialog.unread_count
+                })
+
+        logger.info(f"Найдено {len(all_channels)} каналов, {len(all_groups)} групп и {len(all_private_chats)} личных чатов.")
     except Exception as e:
         all_channels = []
-        logger.error(f"Ошибка при получении каналов: {e}")
+        all_groups = []
+        all_private_chats = []
+        logger.error(f"Ошибка при получении диалогов: {e}")
+
+    # Сортировка
+    if sort_by == "participants":
+        all_channels.sort(key=lambda x: x["participants_count"], reverse=True)
+        all_groups.sort(key=lambda x: x["participants_count"], reverse=True)
+        all_private_chats.sort(key=lambda x: x["participants_count"], reverse=True)
+    elif sort_by == "unread":
+        all_channels.sort(key=lambda x: x["unread_count"], reverse=True)
+        all_groups.sort(key=lambda x: x["unread_count"], reverse=True)
+        all_private_chats.sort(key=lambda x: x["unread_count"], reverse=True)
 
     # Получение существующих папок (фильтров диалогов)
     try:
@@ -176,11 +222,13 @@ async def dashboard(request: Request):
     return templates.TemplateResponse("dashboard.html", {
         "request": request,
         "channels": all_channels,
-        "groups": groups_with_channels,
+        "groups": all_groups,
+        "private_chats": all_private_chats,
+        "groups_with_channels": groups_with_channels,
         "filters": existing_filters,
+        "sort_by": sort_by,
         "message": ""
     })
-
 
 # Страница отображения сообщений из канала
 @router.get("/last-messages/{channel_link}", response_class=HTMLResponse)
@@ -258,6 +306,58 @@ async def last_messages(request: Request, channel_link: str):
             "filters": existing_filters,
             "message": f"Ошибка: {e}"
         })
+
+
+@router.get("/last-messages/group/{group_id}", response_class=HTMLResponse)
+async def last_group_messages(request: Request, group_id: int):
+    user_client = await get_current_user(request)
+    if not user_client:
+        return RedirectResponse(url="/authenticate")
+
+    try:
+        entity = await user_client.get_entity(group_id)
+        messages = []
+        async for message in user_client.iter_messages(entity, limit=10):
+            messages.append({
+                "id": message.id,
+                "text": message.text,
+                "date": message.date.strftime("%Y-%m-%d %H:%M:%S")
+            })
+
+        return templates.TemplateResponse("messages.html", {
+            "request": request,
+            "chat_name": entity.title,
+            "messages": messages
+        })
+    except Exception as e:
+        logger.error(f"Ошибка при получении сообщений из группы {group_id}: {e}")
+        return RedirectResponse(url="/dashboard")
+
+
+@router.get("/last-messages/chat/{user_id}", response_class=HTMLResponse)
+async def last_chat_messages(request: Request, user_id: int):
+    user_client = await get_current_user(request)
+    if not user_client:
+        return RedirectResponse(url="/authenticate")
+
+    try:
+        entity = await user_client.get_entity(user_id)
+        messages = []
+        async for message in user_client.iter_messages(entity, limit=10):
+            messages.append({
+                "id": message.id,
+                "text": message.text,
+                "date": message.date.strftime("%Y-%m-%d %H:%M:%S")
+            })
+
+        return templates.TemplateResponse("messages.html", {
+            "request": request,
+            "chat_name": f"{entity.first_name or ''} {entity.last_name or ''}".strip(),
+            "messages": messages
+        })
+    except Exception as e:
+        logger.error(f"Ошибка при получении сообщений из чата {user_id}: {e}")
+        return RedirectResponse(url="/dashboard")
 
 
 # Страница формы суммаризации
@@ -381,7 +481,7 @@ async def summarize_submit(
 
     summaries = []
     for part in parts:
-        summary = summarize_text(part)
+        summary = await summarize_text(part)
         summaries.append(summary)
 
     final_summary = "\n\n".join(summaries)

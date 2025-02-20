@@ -31,31 +31,43 @@ async def get_all_chats():
             try:
                 # Попытка получить сущность чата
                 entity = await client.get_entity(dialog.id)
-                chat_type = type(entity).__name__
-            except ValueError:
-                logger.error(f"Не удалось получить сущность для чата {dialog.id}")
+                chat_type_mapping = {
+                    "User": "Личный чат",
+                    "Chat": "Группа",
+                    "Channel": "Канал",
+                    "Unknown": "Неизвестный тип"
+                }
+                chat_type = chat_type_mapping.get(type(entity).__name__, "Неизвестный тип")
+            except ValueError as e:
+                logger.error(f"Не удалось получить сущность для чата {dialog.id}: {e}")
                 chat_type = "Unknown"
+
+            participants_count = getattr(dialog.entity, 'participants_count', 0)
+            unread_count = getattr(dialog, 'unread_count', 0)
 
             result.append({
                 "title": dialog.name or "Без названия",
                 "id": dialog.id,
                 "type": chat_type,
-                'participants': dialog.entity.participants_count,
-                'unread_count': dialog.unread_count
+                'participants': participants_count,
+                'unread_count': unread_count
             })
 
-            result.sort(key=lambda x: (x['participants'], x['unread_count']), reverse=True)
+        # Сортировка после завершения цикла
+        result.sort(key=lambda x: (x['participants'], x['unread_count']), reverse=True)
 
         return result
 
     except SessionPasswordNeededError:
         print("Для входа требуется пароль. Введите его ниже.")
         await client.sign_in(password=input("Введите пароль: "))
+        return await get_all_chats()  # Повторный вызов функции
     except Exception as e:
         logger.error(f"Ошибка при получении чатов: {e}", exc_info=True)
 
     finally:
-        await client.disconnect()
+        if client.is_connected():
+            await client.disconnect()
 
 
 async def process_message_with_openai(message_text: str):
