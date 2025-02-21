@@ -32,7 +32,7 @@
         <ul>
             {% for group in groups %}
                 <li>
-                    <a href="/last-messages/{{ group.name }}">{{ group.name }}</a>
+                    <a href="/last-messages/group/{{ group.id }}">{{ group.name }}</a>
                     (участников: {{ group.participants_count }}, непрочитанных: {{ group.unread_count }})
                 </li>
             {% endfor %}
@@ -46,7 +46,7 @@
         <ul>
             {% for chat in private_chats %}
                 <li>
-                    <a href="/last-messages/{{ chat.name }}">{{ chat.name }}</a>
+                    <a href="/last-messages/chat/{{ chat.id }}">{{ chat.name }}</a>
                     (непрочитанных: {{ chat.unread_count }})
                 </li>
             {% endfor %}
@@ -70,7 +70,8 @@
     {% endif %}
 
     <br>
-    <a href="/summarize">Суммаризировать Сообщения</a>
+    <a href="{{ url_for('summarize_form') }}?channels={{ channels | tojson | urlencode }}&groups={{ groups | tojson | urlencode }}&private_chats={{ private_chats | tojson | urlencode }}">
+        Суммаризировать Сообщения</a>
 {% endblock %}
 
 

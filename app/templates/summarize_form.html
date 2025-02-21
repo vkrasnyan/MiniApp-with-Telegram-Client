@@ -1,53 +1,57 @@
-<!DOCTYPE html>
-<html>
-<head>
-    <title>Суммаризация Сообщений</title>
-</head>
-<body>
+{% extends "base.html" %}
+
+{% block content %}
     <h1>Суммаризация Сообщений</h1>
     <form action="/summarize" method="post">
-        <label for="filter_name">Выберите группу (папку):</label>
-        <select name="filter_name" id="filter_name" required>
-            {% for filter in filters %}
-                <option value="{{ filter }}">{{ filter }}</option>
-            {% endfor %}
+        <label for="source">Выберите источник:</label>
+        <select name="source" id="source" required>
+            {% if channels %}
+                <optgroup label="Каналы">
+                    {% for channel in channels %}
+                        <option value="{{ channel.id }}">{{ channel.name }}</option>
+                    {% endfor %}
+                </optgroup>
+            {% endif %}
+            {% if groups %}
+                <optgroup label="Группы">
+                    {% for group in groups %}
+                        <option value="{{ group.id }}">{{ group.name }}</option>
+                    {% endfor %}
+                </optgroup>
+            {% endif %}
+            {% if private_chats %}
+                <optgroup label="Личные чаты">
+                    {% for private_chat in private_chats %}
+                        <option value="{{ private_chat.id }}">{{ private_chat.name }}</option>
+                    {% endfor %}
+                </optgroup>
+            {% endif %}
         </select>
-        <br><br>
-        
+
         <label for="summary_type">Тип суммаризации:</label>
         <select name="summary_type" id="summary_type" required>
-            <option value="last_10">Последние 10 сообщений</option>
+            <option value="last_10" selected>Последние 10 сообщений</option>
             <option value="period">За определённый период</option>
         </select>
-        <br><br>
-        
+
         <div id="period_fields" style="display: none;">
             <label for="period_start">Начальная дата (YYYY-MM-DD):</label>
             <input type="date" id="period_start" name="period_start">
-            <br><br>
+
             <label for="period_end">Конечная дата (YYYY-MM-DD):</label>
             <input type="date" id="period_end" name="period_end">
-            <br><br>
         </div>
-        
+
         <button type="submit">Суммаризировать</button>
     </form>
-    
+
     <script>
-        const summaryTypeSelect = document.getElementById('summary_type');
-        const periodFields = document.getElementById('period_fields');
-        
-        summaryTypeSelect.addEventListener('change', function() {
-            if (this.value === 'period') {
-                periodFields.style.display = 'block';
-            } else {
-                periodFields.style.display = 'none';
-            }
+        document.getElementById('summary_type').addEventListener('change', function() {
+            document.getElementById('period_fields').style.display = (this.value === 'period') ? 'block' : 'none';
         });
     </script>
-    
+
     {% if message %}
         <p style="color:red;">{{ message }}</p>
     {% endif %}
-</body>
-</html>
+{% endblock %}

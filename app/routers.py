@@ -1,20 +1,23 @@
+import json
 import os
 import logging
 from datetime import datetime
 from typing import Optional
 
-from fastapi import APIRouter, Depends, Request, Form
-from sqlalchemy.orm import Session
+from fastapi import APIRouter, Request, Form
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from telethon import functions, types
 from telethon.sync import TelegramClient
 from telethon.sessions import StringSession
-from app.database import get_db
-from app.dependencies import get_current_user, summarize_text
-from app.models import UserSession
+from urllib.parse import unquote
+
+from telethon.tl.types import PeerUser, PeerChannel
+
+from app.dependencies import get_current_user
+from app.client_ai import summarize_text
 from app.config import settings
-from app.telegram_client import get_all_chats, messages_data
+
 
 logger = logging.getLogger(__name__)
 
@@ -103,7 +106,6 @@ async def complete_login_submit(request: Request, code: str = Form(...)):
         return templates.TemplateResponse("complete_login.html", {"request": request, "message": f"Ошибка: {e}"})
 
 
-# Страница панели управления
 @router.get("/dashboard", response_class=HTMLResponse)
 async def dashboard(request: Request, sort_by: str = "participants"):
     user_client = await get_current_user(request)
@@ -123,6 +125,7 @@ async def dashboard(request: Request, sort_by: str = "participants"):
             # Каналы
             if dialog.is_channel and entity.username:
                 all_channels.append({
+                    "id": entity.id,
                     "name": f"@{entity.username}",
                     "participants_count": getattr(entity, "participants_count", 0),
                     "unread_count": dialog.unread_count
@@ -138,7 +141,6 @@ async def dashboard(request: Request, sort_by: str = "participants"):
                     "unread_count": dialog.unread_count
                 })
 
-
             # Личные чаты
             elif dialog.is_user:
                 user_name = f"{entity.first_name or ''} {entity.last_name or ''}".strip()
@@ -149,7 +151,9 @@ async def dashboard(request: Request, sort_by: str = "participants"):
                     "unread_count": dialog.unread_count
                 })
 
-        logger.info(f"Найдено {len(all_channels)} каналов, {len(all_groups)} групп и {len(all_private_chats)} личных чатов.")
+        logger.info(
+            f"Найдено {len(all_channels)} каналов, {len(all_groups)} групп и {len(all_private_chats)} личных чатов.")
+
     except Exception as e:
         all_channels = []
         all_groups = []
@@ -167,57 +171,62 @@ async def dashboard(request: Request, sort_by: str = "participants"):
         all_private_chats.sort(key=lambda x: x["unread_count"], reverse=True)
 
     # Получение существующих папок (фильтров диалогов)
+    groups_with_channels = []
     try:
         dialog_filters = await user_client(functions.messages.GetDialogFiltersRequest())
         existing_filters = dialog_filters.filters if dialog_filters.filters else []
         logger.info(f"Получено {len(existing_filters)} фильтров диалогов.")
-    except Exception as e:
-        existing_filters = []
-        logger.error(f"Ошибка при получении фильтров диалогов: {e}")
 
-    # Создание списка групп с их каналами
-    groups_with_channels = []
-    for dialog_filter in existing_filters:
-        group_channels = []
-        filter_title = getattr(dialog_filter, 'title', f"Фильтр {getattr(dialog_filter, 'id', 'unknown')}")
-        include_peers = getattr(dialog_filter, 'include_peers', [])
+        # Создание списка групп с их каналами
+        for dialog_filter in existing_filters:
+            group_channels = []
+            filter_title = getattr(dialog_filter, 'title', f"Фильтр {getattr(dialog_filter, 'id', 'unknown')}")
+            include_peers = getattr(dialog_filter, 'include_peers', [])
 
-        logger.info(f"Фильтр: {filter_title}, количество include_peers: {len(include_peers)}")
+            logger.info(f"Фильтр: {filter_title}, количество include_peers: {len(include_peers)}")
 
-        for included_peer in include_peers:
-            try:
-                entity = None
+            for included_peer in include_peers:
+                try:
+                    entity = None
 
-                if isinstance(included_peer, types.InputPeerChannel):
-                    entity = await user_client.get_input_entity(included_peer)
-                elif isinstance(included_peer, types.InputPeerUser):
-                    entity = await user_client.get_input_entity(included_peer)
-                elif isinstance(included_peer, types.InputPeerChat):
-                    entity = await user_client.get_input_entity(included_peer)
-                else:
-                    logger.warning(f"Неизвестный тип peer: {included_peer}")
+                    if isinstance(included_peer, types.InputPeerChannel):
+                        entity = await user_client.get_input_entity(included_peer)
+                    elif isinstance(included_peer, types.InputPeerUser):
+                        entity = await user_client.get_input_entity(included_peer)
+                    elif isinstance(included_peer, types.InputPeerChat):
+                        entity = await user_client.get_input_entity(included_peer)
+                    else:
+                        logger.warning(f"Неизвестный тип peer: {included_peer}")
+                        continue
+
+                    if isinstance(entity, types.Channel):
+                        group_channels.append(
+                            f"@{entity.username}" if entity.username else f"{entity.title} (ID: {entity.id})")
+                    elif isinstance(entity, types.User):
+                        name = f"{entity.first_name or ''} {entity.last_name or ''}".strip()
+                        group_channels.append(f"{name} (ID: {entity.id})")
+                    elif isinstance(entity, types.Chat):
+                        group_channels.append(f"{entity.title} (ID: {entity.id})")
+                    else:
+                        logger.warning(f"Неизвестный тип сущности: {type(entity)}")
+
+                except ValueError:
+                    logger.error(f"Ошибка: не найден entity для {included_peer}. Возможно, отсутствует access_hash.")
+                except Exception as e:
+                    logger.error(f"Ошибка при обработке peer {included_peer}: {e}")
                     continue
 
-                if isinstance(entity, types.Channel):
-                    group_channels.append(f"@{entity.username}" if entity.username else f"{entity.title} (ID: {entity.id})")
-                elif isinstance(entity, types.User):
-                    name = f"{entity.first_name or ''} {entity.last_name or ''}".strip()
-                    group_channels.append(f"{name} (ID: {entity.id})")
-                elif isinstance(entity, types.Chat):
-                    group_channels.append(f"{entity.title} (ID: {entity.id})")
-                else:
-                    logger.warning(f"Неизвестный тип сущности: {type(entity)}")
+            groups_with_channels.append({
+                "filter_name": filter_title,
+                "channels": group_channels
+            })
 
-            except ValueError:
-                logger.error(f"Ошибка: не найден entity для {included_peer}. Возможно, отсутствует access_hash.")
-            except Exception as e:
-                logger.error(f"Ошибка при обработке peer {included_peer}: {e}")
-                continue
+            request.session["channels"] = all_channels
+            request.session["groups"] = all_groups
+            request.session["private_chats"] = all_private_chats
 
-        groups_with_channels.append({
-            "filter_name": filter_title,
-            "channels": group_channels
-        })
+    except Exception as e:
+        logger.error(f"Ошибка при получении фильтров диалогов: {e}")
 
     return templates.TemplateResponse("dashboard.html", {
         "request": request,
@@ -229,6 +238,7 @@ async def dashboard(request: Request, sort_by: str = "participants"):
         "sort_by": sort_by,
         "message": ""
     })
+
 
 # Страница отображения сообщений из канала
 @router.get("/last-messages/{channel_link}", response_class=HTMLResponse)
@@ -249,63 +259,7 @@ async def last_messages(request: Request, channel_link: str):
                                           {"request": request, "channel": channel_link, "messages": messages})
     except Exception as e:
         logger.error(f"Ошибка при получении сообщений из канала {channel_link}: {e}")
-        # Попытка повторно получить данные для отображения панели управления с сообщением об ошибке
-        try:
-            dialogs = await user_client.get_dialogs()
-            all_channels = [dialog.entity.username for dialog in dialogs if
-                            dialog.is_channel and dialog.entity.username]
-        except Exception as e:
-            logger.error(f"Ошибка при повторном получении каналов: {e}")
-            all_channels = []
 
-        try:
-            dialog_filters = await user_client(functions.messages.GetDialogFiltersRequest())
-            existing_filters = dialog_filters.filters
-        except Exception as e:
-            logger.error(f"Ошибка при повторном получении фильтров диалогов: {e}")
-            existing_filters = []
-
-        groups_with_channels = []
-        for filter in existing_filters:
-            group_channels = []
-            # Получение названия фильтра, если есть, иначе задаём дефолтное
-            filter_title = getattr(filter, 'title', f"Фильтр {getattr(filter, 'id', 'unknown')}")
-
-            # Получение включённых диалогов, если есть
-            includes = getattr(filter, 'includes', [])
-
-            # Обработка каждого включённого диалога
-            for included in includes:
-                try:
-                    # Получаем peer из DialogFilterIncluded
-                    peer = included.peer
-                    # Проверяем тип peer
-                    if isinstance(peer, types.PeerChannel):
-                        channel_id = peer.channel_id
-                        # Получаем сущность канала по ID
-                        entity = await user_client.get_entity(channel_id)
-                        if isinstance(entity, types.Channel):
-                            logger.info(f"Найден канал: @{entity.username} (ID: {entity.id})")
-                            if entity.username:
-                                group_channels.append(entity.username)
-                            else:
-                                group_channels.append(f"{entity.title} (ID: {entity.id})")
-                except Exception as e:
-                    logger.error(f"Ошибка при получении сущности по Peer {peer}: {e}")
-                    continue
-
-            groups_with_channels.append({
-                "filter_name": filter_title,
-                "channels": group_channels
-            })
-
-        return templates.TemplateResponse("dashboard.html", {
-            "request": request,
-            "channels": all_channels,
-            "groups": groups_with_channels,
-            "filters": existing_filters,
-            "message": f"Ошибка: {e}"
-        })
 
 
 @router.get("/last-messages/group/{group_id}", response_class=HTMLResponse)
@@ -334,14 +288,14 @@ async def last_group_messages(request: Request, group_id: int):
         return RedirectResponse(url="/dashboard")
 
 
-@router.get("/last-messages/chat/{user_id}", response_class=HTMLResponse)
-async def last_chat_messages(request: Request, user_id: int):
+@router.get("/last-messages/chat/{chat_id}", response_class=HTMLResponse)
+async def last_chat_messages(request: Request, chat_id: int):
     user_client = await get_current_user(request)
     if not user_client:
         return RedirectResponse(url="/authenticate")
 
     try:
-        entity = await user_client.get_entity(user_id)
+        entity = await user_client.get_entity(chat_id)
         messages = []
         async for message in user_client.iter_messages(entity, limit=10):
             messages.append({
@@ -356,33 +310,24 @@ async def last_chat_messages(request: Request, user_id: int):
             "messages": messages
         })
     except Exception as e:
-        logger.error(f"Ошибка при получении сообщений из чата {user_id}: {e}")
+        logger.error(f"Ошибка при получении сообщений из чата {chat_id}: {e}")
         return RedirectResponse(url="/dashboard")
 
 
-# Страница формы суммаризации
 @router.get("/summarize", response_class=HTMLResponse)
-async def summarize_form(request: Request):
-    user_client = await get_current_user(request)
-    if not user_client:
-        return RedirectResponse(url="/authenticate")
-
+async def summarize_form(request: Request, channels: str = "", groups: str = "", private_chats: str = ""):
     try:
-        dialog_filters = await user_client(functions.messages.GetDialogFiltersRequest())
-        existing_filters = dialog_filters.filters
-    except Exception as e:
-        existing_filters = []
-        logger.error(f"Ошибка при получении фильтров диалогов: {e}")
-
-    # Use getattr to safely access 'title', provide a default if missing
-    filter_names = [
-        getattr(dialog_filter, 'title', f"Фильтр {getattr(dialog_filter, 'id', 'unknown')}")
-        for dialog_filter in existing_filters
-    ]
+        channels = json.loads(unquote(channels)) if channels else []
+        groups = json.loads(unquote(groups)) if groups else []
+        private_chats = json.loads(unquote(private_chats)) if private_chats else []
+    except json.JSONDecodeError:
+        channels, groups, private_chats = [], [], []
 
     return templates.TemplateResponse("summarize_form.html", {
         "request": request,
-        "filters": filter_names,
+        "channels": channels,
+        "groups": groups,
+        "private_chats": private_chats,
         "message": ""
     })
 
@@ -390,7 +335,7 @@ async def summarize_form(request: Request):
 @router.post("/summarize", response_class=HTMLResponse)
 async def summarize_submit(
         request: Request,
-        filter_name: str = Form(...),
+        source: str = Form(...),
         summary_type: str = Form(...),
         period_start: Optional[str] = Form(None),
         period_end: Optional[str] = Form(None)
@@ -399,112 +344,66 @@ async def summarize_submit(
     if not user_client:
         return RedirectResponse(url="/authenticate")
 
-    # Поиск фильтра по названию
-    try:
-        dialog_filters = await user_client(functions.messages.GetDialogFiltersRequest())
-        existing_filters = dialog_filters.filters
-
-        # Найти фильтр по названию
-        selected_filter = next((f for f in existing_filters if getattr(f, 'title', None) == filter_name), None)
-
-        if not selected_filter:
-            raise ValueError("Фильтр не найден.")
-    except Exception as e:
-        logger.error(f"Ошибка при поиске фильтра: {e}")
-        return templates.TemplateResponse(
-            "summarize_form.html",
-            {"request": request, "filters": [], "message": f"Ошибка: {e}"}
-        )
-
-    # Получение пиров из выбранного фильтра
-    include_peers = getattr(selected_filter, 'include_peers', [])
-    if not include_peers:
-        return templates.TemplateResponse(
-            "summarize_form.html",
-            {"request": request, "filters": [], "message": "Выбранный фильтр не содержит каналов."}
-        )
-
     messages_to_summarize = []
 
-    for peer in include_peers:
-        try:
-            entity = None
-            channel_link = None
+    try:
+        # Конвертируем ID в число
+        source_id = int(source)
 
-            if isinstance(peer, types.InputPeerChannel):
-                entity = await user_client.get_entity(peer)
-                if entity.username:
-                    channel_link = f"@{entity.username}"
-                else:
-                    channel_link = f"ID {entity.id}"
-            elif isinstance(peer, types.InputPeerChat):
-                entity = await user_client.get_entity(peer)
-                channel_link = f"chat_id={entity.id}"
+        # Проверяем, является ли source пользователем, каналом или чатом
+        if isinstance(source_id, int):
+            if source_id < 0:
+                # Это, вероятно, пользователь
+                entity = await user_client.get_entity(PeerUser(source_id))
+            elif source_id > 0:
+                # Это канал, группа или чат
+                entity = await user_client.get_entity(PeerChannel(source_id))
             else:
-                logger.warning(f"Неизвестный тип пира: {peer}")
-                continue
+                raise ValueError("Некорректный ID источника")
 
-            # Проверяем, что entity и channel_link установлены
-            if entity and channel_link:
-                logger.info(f"Получение сообщений из канала {channel_link}")
-                if summary_type == "last_10":
-                    async for message in user_client.iter_messages(entity, limit=10):
-                        if message.text:
-                            messages_to_summarize.append(message.text)
-                elif summary_type == "period" and period_start and period_end:
-                    start_date = datetime.strptime(period_start, "%Y-%m-%d")
-                    end_date = datetime.strptime(period_end, "%Y-%m-%d")
-                    async for message in user_client.iter_messages(entity, offset_date=end_date, reverse=True):
-                        if message.date < start_date:
-                            break
-                        if message.text:
-                            messages_to_summarize.append(message.text)
-            else:
-                logger.error(f"Не удалось получить сущность для канала {channel_link}")
+        logger.info(f"Получение сообщений из {entity.title if hasattr(entity, 'title') else 'неизвестного источника'}")
 
-        except Exception as e:
-            logger.error(f"Ошибка при получении сообщений из канала {channel_link}: {e}")
-            continue
+        if summary_type == "last_10":
+            async for message in user_client.iter_messages(entity, limit=10):
+                if message.text:
+                    messages_to_summarize.append(message.text)
 
-    # Объединение сообщений для суммаризации
+        elif summary_type == "period" and period_start and period_end:
+            start_date = datetime.strptime(period_start, "%Y-%m-%d")
+            end_date = datetime.strptime(period_end, "%Y-%m-%d")
+            async for message in user_client.iter_messages(entity, offset_date=end_date, reverse=True):
+                if message.date < start_date:
+                    break
+                if message.text:
+                    messages_to_summarize.append(message.text)
+
+    except Exception as e:
+        logger.error(f"Ошибка при получении сообщений: {e}")
+        return templates.TemplateResponse(
+            "summarize_form.html",
+            {"request": request, "message": f"Ошибка: {e}"}
+        )
+
+    # Объединяем текст для суммаризации
     combined_messages = "\n\n".join(messages_to_summarize)
 
     if not combined_messages:
         return templates.TemplateResponse(
             "summarize_form.html",
-            {"request": request, "filters": [], "message": "Нет сообщений для суммаризации."}
+            {"request": request, "message": "Нет сообщений для суммаризации."}
         )
 
-    # Разделение на части, если текст слишком длинный
-    MAX_CHARS = 3000  # Примерное ограничение, зависит от модели и токенов
+    # Разбиваем на части, если текст слишком длинный
+    MAX_CHARS = 3000
     parts = [combined_messages[i:i + MAX_CHARS] for i in range(0, len(combined_messages), MAX_CHARS)]
 
-    summaries = []
-    for part in parts:
-        summary = await summarize_text(part)
-        summaries.append(summary)
+    summaries = [await summarize_text(part) for part in parts]  # Суммаризируем по частям
 
     final_summary = "\n\n".join(summaries)
 
     return templates.TemplateResponse(
         "summary_result.html",
         {"request": request, "summary": final_summary}
-    )
-
-
-@router.get("/chats", response_class=HTMLResponse)
-async def show_chats(request: Request):
-    user_client = await get_current_user(request)
-    if not user_client:
-        return RedirectResponse(url="/authenticate")
-    dialogs = await get_all_chats()  # Получение списка чатов
-    return templates.TemplateResponse("dialogs.html", {"request": request, "dialogs": dialogs})
-
-@router.get("/messages")
-async def get_messages(request: Request):
-    """Отображение собранных сообщений."""
-    return templates.TemplateResponse(
-        "sender_info.html", {"request": request, "messages": messages_data}
     )
 
 
