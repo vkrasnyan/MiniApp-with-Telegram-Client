@@ -1,5 +1,8 @@
 import logging
 from datetime import datetime
+from typing import List
+
+from telethon import TelegramClient
 from telethon.tl.types import PeerUser, PeerChannel
 
 from app.client_ai import summarize_text
@@ -7,13 +10,12 @@ from app.client_ai import summarize_text
 logger = logging.getLogger(__name__)
 
 
-async def get_entity_by_source(user_client, source_id):
+async def get_entity_by_source(user_client: TelegramClient, source_id: int):
+    """Получает сущности (пользователя или канал) по заданному ID"""
     try:
         if source_id < 0:
-            # Это пользователь
             return await user_client.get_entity(PeerUser(source_id))
         elif source_id > 0:
-            # Это канал, группа или чат
             return await user_client.get_entity(PeerChannel(source_id))
         else:
             raise ValueError("Некорректный ID источника")
@@ -23,6 +25,7 @@ async def get_entity_by_source(user_client, source_id):
 
 
 async def get_messages_to_summarize(user_client, entity, summary_type, period_start, period_end):
+    """Получение сообщений для суммаризации"""
     messages_to_summarize = []
     try:
         if summary_type == "last_10":
@@ -45,16 +48,15 @@ async def get_messages_to_summarize(user_client, entity, summary_type, period_st
 
 
 def split_text_for_summary(text: str, max_chars: int = 3000):
+    """Разбивает текст на части для передачи в OpenAI"""
     return [text[i:i + max_chars] for i in range(0, len(text), max_chars)]
 
 
-async def summarize_messages(messages_to_summarize):
+async def summarize_messages(messages_to_summarize: List[str]) -> str:
+    """Объединяет и суммаризирует список сообщений"""
     combined_messages = "\n\n".join(messages_to_summarize)
-
     if not combined_messages:
         return "Нет сообщений для суммаризации."
-
     parts = split_text_for_summary(combined_messages)
     summaries = [await summarize_text(part) for part in parts]
-
     return "\n\n".join(summaries)

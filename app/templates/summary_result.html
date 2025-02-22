@@ -1,12 +1,10 @@
-<!DOCTYPE html>
-<html>
-<head>
-    <title>Результат Суммаризации</title>
-</head>
-<body>
+{% extends "base.html" %}
+
+{% block content %}
+
     <h1>Результат Суммаризации</h1>
     <p>{{ summary }}</p>
     <br>
     <a href="/summarize">Назад</a>
-</body>
-</html>
+
+{% endblock %}

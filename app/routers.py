@@ -52,9 +52,9 @@ async def authenticate_submit(request: Request, phone_number: str = Form(...)):
         return templates.TemplateResponse("authenticate.html", {"request": request, "message": f"Ошибка: {e}"})
 
 
-# Страница ввода кода подтверждения
 @router.get("/complete-login", response_class=HTMLResponse)
 async def complete_login_form(request: Request):
+    """Страница ввода кода подтверждения"""
     temp_session = request.session.get("temp_session")
     phone_number = request.session.get("phone_number")
     if not temp_session or not phone_number:
@@ -62,9 +62,9 @@ async def complete_login_form(request: Request):
     return templates.TemplateResponse("complete_login.html", {"request": request, "message": ""})
 
 
-# Обработка ввода кода подтверждения
 @router.post("/complete-login", response_class=HTMLResponse)
 async def complete_login_submit(request: Request, code: str = Form(...)):
+    """Обработка ввода кода подтверждения"""
     temp_session = request.session.get("temp_session")
     phone_number = request.session.get("phone_number")
     phone_code_hash = request.session.get("phone_code_hash")
@@ -72,7 +72,7 @@ async def complete_login_submit(request: Request, code: str = Form(...)):
     if not temp_session or not phone_number or not phone_code_hash:
         return RedirectResponse(url="/authenticate")
 
-    user_client = get_telegram_client(session_str=temp_session)
+    user_client = await get_telegram_client(session_str=temp_session)
     await user_client.connect()
     try:
         await user_client.sign_in(phone_number, code, phone_code_hash=phone_code_hash)
@@ -96,7 +96,7 @@ async def complete_login_submit(request: Request, code: str = Form(...)):
 
 @router.get("/dashboard", response_class=HTMLResponse)
 async def dashboard(request: Request, sort_by: str = "participants"):
-    """Роутер для отображения панели управления"""
+    """Роутер для отображения панели управления каналами, группами и чатами пользователя"""
     user_client = await get_current_user(request)
     if not user_client:
         return RedirectResponse(url="/authenticate")
@@ -123,9 +123,9 @@ async def dashboard(request: Request, sort_by: str = "participants"):
     })
 
 
-# Страница отображения сообщений из канала
 @router.get("/last-messages/{channel_link}", response_class=HTMLResponse)
 async def last_messages(request: Request, channel_link: str):
+    """Страница отображения сообщений из канала"""
     user_client = await get_current_user(request)
     if not user_client:
         return RedirectResponse(url="/authenticate")
@@ -138,9 +138,9 @@ async def last_messages(request: Request, channel_link: str):
         logger.error(f"Ошибка при получении сообщений из канала {channel_link}: {e}")
 
 
-
 @router.get("/last-messages/group/{group_id}", response_class=HTMLResponse)
 async def last_group_messages(request: Request, group_id: int):
+    """Страница отображения сообщений из групп"""
     user_client = await get_current_user(request)
     if not user_client:
         return RedirectResponse(url="/authenticate")
@@ -161,6 +161,7 @@ async def last_group_messages(request: Request, group_id: int):
 
 @router.get("/last-messages/chat/{chat_id}", response_class=HTMLResponse)
 async def last_chat_messages(request: Request, chat_id: int):
+    """Страница отображения сообщений из личных чатов пользователя"""
     user_client = await get_current_user(request)
     if not user_client:
         return RedirectResponse(url="/authenticate")
@@ -181,6 +182,8 @@ async def last_chat_messages(request: Request, chat_id: int):
 
 @router.get("/summarize", response_class=HTMLResponse)
 async def summarize_form(request: Request, channels: str = "", groups: str = "", private_chats: str = ""):
+    """Форма суммаризации, где делается выбор канала для суммаризации и типа суммаризации (по дате или 10
+    последних сообщений)"""
     try:
         channels = json.loads(unquote(channels)) if channels else []
         groups = json.loads(unquote(groups)) if groups else []
@@ -205,6 +208,7 @@ async def summarize_submit(
         period_start: Optional[str] = Form(None),
         period_end: Optional[str] = Form(None)
 ):
+    """Роутер, формирующий сообщение для суммаризации и делающий запрос к OpenAI"""
     user_client = await get_current_user(request)
     if not user_client:
         return RedirectResponse(url="/authenticate")
@@ -239,6 +243,7 @@ async def summarize_submit(
 # Выход из системы
 @router.get("/logout", response_class=HTMLResponse)
 async def logout(request: Request):
+    """Роутер выхода из системы"""
     request.session.clear()
     logger.info("Пользователь вышел из системы.")
     return RedirectResponse(url="/", status_code=303)

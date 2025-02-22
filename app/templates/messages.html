@@ -15,9 +15,9 @@
                 <span class="message-date">{{ message.date }}</span>
                 <p class="message-text">
                     {% if message.text %}
-                        {{ message.text }}  {# Выводим текст, если он есть #}
+                        {{ message.text }}
                     {% else %}
-                        <span class="media-placeholder">[Медиафайл]</span>  {# Или выводим placeholder, если сообщения без текста #}
+                        <span class="media-placeholder">[Медиафайл]</span>
                     {% endif %}
                 </p>
             </li>

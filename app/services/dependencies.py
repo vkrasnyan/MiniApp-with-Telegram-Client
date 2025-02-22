@@ -1,16 +1,13 @@
 import logging
 
 from fastapi import Request
-from telethon import TelegramClient
-from telethon.sessions import StringSession
-from app.config import settings
 from app.telegram_client import get_telegram_client
 
 logger = logging.getLogger(__name__)
 
 
-# Функция для получения текущего пользователя из сессии
 async def get_current_user(request: Request):
+    """Функция для получения текущего пользователя из сессии"""
     session_str = request.session.get("session_str")
     if not session_str:
         return None
@@ -28,6 +25,7 @@ async def get_current_user(request: Request):
 
 
 async def get_messages(user_client, entity, limit: int = 10):
+    """Функция для получения сообщений из канала, группы или личного чата"""
     messages = []
     async for message in user_client.iter_messages(entity, limit=limit):
         messages.append({

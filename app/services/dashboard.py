@@ -1,10 +1,13 @@
 import logging
-from telethon import functions, types
+from typing import List
+
+from telethon import functions, types, TelegramClient
 
 logger = logging.getLogger(__name__)
 
 
-async def get_dialogs_info(user_client):
+async def get_dialogs_info(user_client: TelegramClient):
+    """Функция для получения списка сообщений из каналов, групп и личных чатов пользователя"""
     try:
         dialogs = await user_client.get_dialogs()
         all_channels, all_groups, all_private_chats = [], [], []
@@ -44,6 +47,8 @@ async def get_dialogs_info(user_client):
 
 
 def sort_dialogs(all_channels, all_groups, all_private_chats, sort_by):
+    """Функция для сортировки каналов, групп и личных чатов пользователя по количеству участников и по количеству
+    непрочитанных сообщений"""
     if sort_by == "participants":
         all_channels.sort(key=lambda x: x["participants_count"], reverse=True)
         all_groups.sort(key=lambda x: x["participants_count"], reverse=True)
@@ -54,7 +59,8 @@ def sort_dialogs(all_channels, all_groups, all_private_chats, sort_by):
         all_private_chats.sort(key=lambda x: x["unread_count"], reverse=True)
 
 
-async def get_dialog_filters(user_client):
+async def get_dialog_filters(user_client: TelegramClient):
+    """Функция для получения фильтров диалогов"""
     groups_with_channels = []
     try:
         dialog_filters = await user_client(functions.messages.GetDialogFiltersRequest())
@@ -88,6 +94,7 @@ async def get_dialog_filters(user_client):
 
 
 async def get_entity_from_peer(user_client, included_peer):
+    """Функция для получения entity из пира"""
     try:
         if isinstance(included_peer, types.InputPeerChannel):
             entity = await user_client.get_input_entity(included_peer)

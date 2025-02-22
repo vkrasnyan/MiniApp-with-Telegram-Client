@@ -10,6 +10,7 @@ clientAI = openai.AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
 
 
 async def summarize_text(text: str) -> str:
+    """Передача запроса на OpenAI API"""
     try:
         response = await clientAI.chat.completions.create(
             model="gpt-3.5-turbo",  # Используйте нужную модель

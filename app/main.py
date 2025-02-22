@@ -14,36 +14,30 @@ from app.database import Base, engine
 from app.routers import router
 from app.services.dependencies import get_current_user
 
-# Настройка логирования
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Создание таблиц в БД
 Base.metadata.create_all(bind=engine)
 
 app = FastAPI()
 
-# Настройка шаблонов
 template_dir = os.path.join(os.path.dirname(__file__), "templates")
 templates = Jinja2Templates(directory=template_dir)
 
-# Настройка middleware для сессий
 app.add_middleware(SessionMiddleware, secret_key=os.getenv(settings.SECRET_KEY, "your_default_secret_key"))
-
 
 app.include_router(router)
 static_dir = os.path.join(os.path.dirname(__file__), 'static')
 app.mount("/static", StaticFiles(directory=static_dir), name="static")
 
 
-# Главная страница
 @app.get("/", response_class=HTMLResponse)
 async def index(request: Request):
+    """Главная страница"""
     user_client = await get_current_user(request)
     if user_client:
         return RedirectResponse(url="/dashboard")
     return templates.TemplateResponse("index.html", {"request": request})
-
 
 
 if __name__ == "__main__":
